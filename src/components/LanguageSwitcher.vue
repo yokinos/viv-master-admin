@@ -4,13 +4,9 @@
       <translate-icon />
     </t-button>
     <t-dropdown-menu>
-      <t-dropdown-item
-        v-for="(lang, index) in languageList"
-        :key="index"
-        :value="lang.value"
-        @click="(options) => changeLang(options.value as string)"
-        >{{ lang.content }}</t-dropdown-item
-      ></t-dropdown-menu
+      <t-dropdown-item v-for="(lang, index) in languageList" :key="index" :value="lang.value" @click="onChange">{{
+        lang.content
+      }}</t-dropdown-item></t-dropdown-menu
     >
   </t-dropdown>
 </template>
@@ -22,7 +18,14 @@ import { useLocale } from '@/locales/useLocale';
 
 const { changeLocale } = useLocale();
 
-const changeLang = (lang: string) => {
-  changeLocale(lang);
-};
+// TDesign 的 dropdown click 载荷在不同版本里是 DropdownOption / string / number，
+// 这里统一收敛，避免模板里直接取 .value 触发类型错误。
+type DropdownPayload = string | number | { value?: string | number } | undefined;
+
+function onChange(payload: DropdownPayload) {
+  const value =
+    payload !== null && typeof payload === 'object' ? payload.value : (payload as string | number | undefined);
+  if (value === undefined || value === '') return;
+  changeLocale(String(value));
+}
 </script>
