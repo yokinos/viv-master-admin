@@ -2,7 +2,13 @@
   "name": "viv-master-admin",
   "version": "0.14.0",
   "type": "module",
+  "packageManager": "pnpm@10.25.0",
+  "engines": {
+    "node": ">=22.12.0",
+    "pnpm": ">=10"
+  },
   "scripts": {
+    "preinstall": "node scripts/check-package-manager.mjs",
     "dev:mock": "vite --open --mode mock",
     "dev": "vite --open --mode development",
     "dev:linux": "vite --mode development",
@@ -78,6 +84,12 @@
     "vite-svg-loader": "^5.1.1",
     "vue-tsc": "^3.3.6"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "core-js-pure"
+    ]
+  },
   "config": {
     "commitizen": {
       "path": "./node_modules/cz-conventional-changelog"
@@ -86,14 +98,11 @@
   "lint-staged": {
     "*.{js,jsx,vue,ts,tsx}": [
       "prettier --write",
-      "npm run lint:fix"
+      "pnpm lint:fix"
     ],
     "*.{html,vue,css,sass,less}": [
-      "npm run stylelint:fix"
+      "pnpm stylelint:fix"
     ]
-  },
-  "engines": {
-    "node": ">=22.12.0"
   },
   "description": "Base on tdesign-starter-cli"
 }
