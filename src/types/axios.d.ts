@@ -56,6 +56,18 @@ export interface RequestOptions {
    */
   withToken?: boolean;
   /**
+   * 是否给请求体自动补 `version`（VivApiRequest 必填 1000–9999）
+   *
+   * 默认 true；接非 Viv 后端时置 false
+   */
+  injectVivVersion?: boolean;
+  /**
+   * 这个请求失败时不触发"续期 refreshToken"
+   *
+   * 刷新接口与登出接口必须置 true，否则 -401 会绕回续期逻辑形成递归
+   */
+  skipAuthRefresh?: boolean;
+  /**
    * 重试配置
    */
   retry?: {

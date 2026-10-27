@@ -19,8 +19,12 @@ export interface MenuRoute {
 export type ModeType = 'dark' | 'light';
 
 export interface UserInfo {
+  /** 展示名，取后端 NickName，回退 Name */
   name: string;
   roles: string[];
+  /** 后端 long → 字符串 */
+  userId?: string;
+  avatarUrl?: string;
 }
 
 export interface NotificationItem {

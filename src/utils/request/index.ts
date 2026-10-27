@@ -5,6 +5,7 @@ import merge from 'lodash/merge';
 
 import { ContentTypeEnum } from '@/constants';
 import { useUserStore } from '@/store';
+import type { Result } from '@/types/axios';
 
 import { VAxios } from './Axios';
 import type { AxiosTransform, CreateAxiosOptions } from './AxiosTransform';
@@ -14,6 +15,58 @@ const env = import.meta.env.MODE || 'development';
 
 // 如果是mock模式 或 没启用直连代理 就不配置host 会走本地Mock拦截 或 Vite 代理
 const host = env === 'mock' || import.meta.env.VITE_IS_REQUEST_PROXY !== 'true' ? '' : import.meta.env.VITE_API_URL;
+
+/** Viv 业务信封的成功码（ApiResultCode.Success = 200） */
+const VIV_SUCCESS_CODE = 200;
+
+/** 需要踢回登录页的业务码：-400 Token 为空 / -401 无效 / -402 已过期 / -403 已被踢出 */
+const VIV_AUTH_ERROR_CODES = [-400, -401, -402, -403];
+
+/** 其中可以拿 refreshToken 续期的两个（-400/-403 重试没有意义） */
+const VIV_REFRESHABLE_CODES = [-401, -402];
+
+/** VivApiRequest.Version 必填（1000–9999），集中在 request 层注入 */
+const VIV_API_VERSION = 1000;
+
+/** 给请求体补 version：每个 Viv 请求基类都要求它，写在各调用点既啰嗦又容易漏（漏了直接 -201） */
+function injectVivVersion(data: unknown): void {
+  if (!data || typeof data !== 'object' || data instanceof FormData || Array.isArray(data)) return;
+
+  const body = data as Recordable;
+  if (body.version === undefined) body.version = VIV_API_VERSION;
+}
+
+/** 登录态失效且**可以尝试续期**：携带原始 config，刷新成功后可原样重放 */
+class VivTokenExpiredError extends Error {
+  constructor(public readonly config: AxiosRequestConfig) {
+    super('登录已过期');
+    this.name = 'VivTokenExpiredError';
+  }
+}
+
+/** 刷新中的单例：并发请求同时过期时只打一次刷新接口 */
+let refreshing: Promise<boolean> | null = null;
+
+function refreshOnce(): Promise<boolean> {
+  refreshing ??= useUserStore()
+    .refreshSession()
+    .finally(() => {
+      refreshing = null;
+    });
+
+  return refreshing;
+}
+
+/** 登录态失效：清本地登录态并回登录页（带上原来的地址） */
+function handleAuthFailure(): void {
+  // 传 false：不再回头调登出接口 —— 那个请求本身也会 -401，会绕回本函数
+  useUserStore().logout(false);
+
+  if (window.location.pathname !== '/login') {
+    const redirect = encodeURIComponent(window.location.pathname + window.location.search);
+    window.location.href = `/login?redirect=${redirect}`;
+  }
+}
 
 // 数据处理，方便区分多种处理方式
 const transform: AxiosTransform = {
@@ -43,25 +96,50 @@ const transform: AxiosTransform = {
       throw new Error('请求接口错误');
     }
 
-    //  这里 code为 后台统一的字段，需要在 types.ts内修改为项目自己的接口返回格式
-    const { code } = data;
+    // Viv 统一信封：code === 200 成功；-4xx 是登录态问题；其余按失败处理并透传后端文案
+    const { code, message } = data as Result & { message?: string };
 
-    // 这里逻辑可以根据项目进行修改
-    const hasSuccess = data && code === 0;
-    if (hasSuccess) {
+    if (code === VIV_SUCCESS_CODE) {
       return data.data;
     }
 
-    throw new Error(`请求接口错误, 错误码: ${code}`);
+    const requestOptions = (res.config as Recordable)?.requestOptions ?? {};
+
+    // -401 令牌无效 / -402 已过期：可以拿 refreshToken 续一次，交给 requestCatchHook 重放
+    if (
+      VIV_REFRESHABLE_CODES.includes(code) &&
+      !requestOptions.skipAuthRefresh &&
+      !(res.config as Recordable).__vivRetried
+    ) {
+      throw new VivTokenExpiredError(res.config);
+    }
+
+    // -400 没带令牌 / -403 已被踢出 / 刷新本身失败：直接踢回登录页，重试没有意义
+    if (VIV_AUTH_ERROR_CODES.includes(code) && !requestOptions.skipAuthRefresh) {
+      handleAuthFailure();
+    }
+
+    // 后端的 message 是给人看的（"账号或者密码错误"），直接抛给页面
+    throw new Error(message || `请求失败（${code}）`);
   },
 
   // 请求前处理配置
   beforeRequestHook: (config, options) => {
+    // 续期后的重放：url 已是绝对地址、version 已注入、params 已整形，原样发出去
+    if ((config as Recordable).__vivRetried) {
+      return config;
+    }
+
     const { apiUrl, isJoinPrefix, urlPrefix, joinParamsToUrl, formatDate, joinTime = true } = options;
 
     // 添加接口前缀
     if (isJoinPrefix && urlPrefix && isString(urlPrefix)) {
       config.url = `${urlPrefix}${config.url}`;
+    }
+
+    // Viv 每个请求体都要 version，集中注入
+    if (options.injectVivVersion !== false) {
+      injectVivVersion(config.data);
     }
 
     // 将baseUrl拼接
@@ -149,6 +227,22 @@ const transform: AxiosTransform = {
     config.headers = { ...config.headers, 'Content-Type': ContentTypeEnum.Json };
     return backoff.then((config) => instance.request(config as AxiosRequestConfig));
   },
+
+  // 业务异常收口：登录态失效时续期一次并重放原请求，续不上才踢回登录页
+  requestCatchHook: async (error) => {
+    if (!(error instanceof VivTokenExpiredError)) throw error;
+
+    const config = error.config as Recordable;
+    // 先打标记再重放：第二次失败就走"踢回登录页"，不会无限续期
+    config.__vivRetried = true;
+
+    if (await refreshOnce()) {
+      return request.request(config as AxiosRequestConfig);
+    }
+
+    handleAuthFailure();
+    throw new Error('登录已过期，请重新登录');
+  },
 };
 
 function createAxios(opt?: Partial<CreateAxiosOptions>) {
@@ -156,8 +250,8 @@ function createAxios(opt?: Partial<CreateAxiosOptions>) {
     merge(
       <CreateAxiosOptions>{
         // https://developer.mozilla.org/en-US/docs/Web/HTTP/Authentication#authentication_schemes
-        // 例如: authenticationScheme: 'Bearer'
-        authenticationScheme: '',
+        // Viv 是标准 Bearer JWT
+        authenticationScheme: 'Bearer',
         // 超时
         timeout: 10 * 1000,
         // 携带Cookie
@@ -172,10 +266,11 @@ function createAxios(opt?: Partial<CreateAxiosOptions>) {
           apiUrl: host,
           // 是否自动添加接口前缀
           isJoinPrefix: true,
-          // 接口前缀
-          // 例如: https://www.baidu.com/api
-          // urlPrefix: '/api'
-          urlPrefix: import.meta.env.VITE_API_URL_PREFIX,
+          // 接口前缀留空：服务前缀（/{短名}/api）由 api/services.ts 写在每个 URL 里，
+          // 全局只认网关根地址（VITE_API_URL），这样接多个服务不用改这里
+          urlPrefix: '',
+          // 给请求体补 version（VivApiRequest 必填）
+          injectVivVersion: true,
           // 是否返回原生响应头 比如：需要获取响应头时使用该属性
           isReturnNativeResponse: false,
           // 需要对返回数据进行处理

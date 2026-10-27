@@ -1,5 +1,6 @@
 import cloneDeep from 'lodash/cloneDeep';
 
+import type { BackendRouteItem } from '@/api/model/apex/userModel';
 import type { RouteItem } from '@/api/model/permissionModel';
 import {
   BLANK_LAYOUT,
@@ -9,6 +10,45 @@ import {
   PAGE_NOT_FOUND_ROUTE,
   PARENT_LAYOUT,
 } from '@/utils/route/constant';
+
+/**
+ * 后端路由树 → starter 的 RouteItem。
+ *
+ * 后端（`VueMenuRouteAdapter`）给的就是 Vue Router 形状，这里只做两件事：
+ * ① `meta.title` 是纯字符串，转成 starter 的多语言对象（两种语言先同文案，等 i18n 接菜单再说）；
+ * ② 补 `name`：后端没配 name 时从 path 生成，vue-router 要求同级唯一。
+ */
+function toLocalizedTitle(title?: string) {
+  return title ? { zh_CN: title, en_US: title } : undefined;
+}
+
+function nameFromPath(path: string): string {
+  return path.replace(/^\/+/, '').replace(/\W+/g, '-') || 'root';
+}
+
+export function transformBackendRoutes(nodes: BackendRouteItem[]): RouteItem[] {
+  return nodes.map((node) => {
+    const children = node.children?.length ? transformBackendRoutes(node.children) : undefined;
+
+    const item = {
+      path: node.path,
+      name: node.name || nameFromPath(node.path),
+      // 目录节点后端固定给 LAYOUT；叶子节点是 /pages 下的相对路径
+      component: node.component || 'LAYOUT',
+      redirect: node.redirect,
+      meta: {
+        title: toLocalizedTitle(node.meta?.title),
+        icon: node.meta?.icon,
+        hidden: node.meta?.hidden ?? false,
+        keepAlive: node.meta?.keepAlive ?? true,
+        orderNo: node.meta?.orderNo,
+      },
+      ...(children ? { children } : {}),
+    } as RouteItem;
+
+    return item;
+  });
+}
 
 // 动态从包内引入单个Icon,如果没有网络环境可以使用这种方式 但是会导致产物存在多个chunk
 // const iconsPath = import.meta.glob('../../../node_modules/tdesign-icons-vue-next/esm/components/*.js');

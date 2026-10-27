@@ -311,7 +311,15 @@ export class VAxios {
         })
         .catch((e: Error | AxiosError) => {
           if (requestCatchHook && isFunction(requestCatchHook)) {
-            reject(requestCatchHook(e, opt));
+            const handled = requestCatchHook(e, opt);
+
+            // 钩子可能是异步的（如 refreshToken 续期后重放），返回 Promise 时要等它
+            if (handled && typeof (handled as Promise<T>)?.then === 'function') {
+              (handled as Promise<T>).then(resolve, reject);
+            } else {
+              reject(handled);
+            }
+
             return;
           }
           if (axios.isAxiosError(e)) {
