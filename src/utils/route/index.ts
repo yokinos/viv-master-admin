@@ -27,27 +27,52 @@ function nameFromPath(path: string): string {
 }
 
 export function transformBackendRoutes(nodes: BackendRouteItem[]): RouteItem[] {
-  return nodes.map((node) => {
-    const children = node.children?.length ? transformBackendRoutes(node.children) : undefined;
+  return hoistPageChildren(nodes.map(toRouteItem));
+}
 
-    const item = {
-      path: node.path,
-      name: node.name || nameFromPath(node.path),
-      // 目录节点后端固定给 LAYOUT；叶子节点是 /pages 下的相对路径
-      component: node.component || 'LAYOUT',
-      redirect: node.redirect,
-      meta: {
-        title: toLocalizedTitle(node.meta?.title),
-        icon: node.meta?.icon,
-        hidden: node.meta?.hidden ?? false,
-        keepAlive: node.meta?.keepAlive ?? true,
-        orderNo: node.meta?.orderNo,
-      },
-      ...(children ? { children } : {}),
-    } as RouteItem;
+function toRouteItem(node: BackendRouteItem): RouteItem {
+  const children = node.children?.length ? node.children.map(toRouteItem) : undefined;
 
-    return item;
+  return {
+    path: node.path,
+    name: node.name || nameFromPath(node.path),
+    // 目录节点后端固定给 LAYOUT；叶子节点是 /pages 下的相对路径
+    component: node.component || 'LAYOUT',
+    redirect: node.redirect,
+    meta: {
+      title: toLocalizedTitle(node.meta?.title),
+      icon: node.meta?.icon,
+      hidden: node.meta?.hidden ?? false,
+      keepAlive: node.meta?.keepAlive ?? true,
+      orderNo: node.meta?.orderNo,
+    },
+    ...(children ? { children } : {}),
+  } as RouteItem;
+}
+
+/**
+ * 子页面挂在页面节点下面。页面组件自己没有 router-view，
+ * 嵌套路由进得去但渲染不出来。提到最近的布局节点下，由布局出口渲染。
+ */
+function hoistPageChildren(nodes: RouteItem[]): RouteItem[] {
+  const result: RouteItem[] = [];
+
+  nodes.forEach((node) => {
+    const component = String(node.component ?? '');
+    const children = node.children?.length ? hoistPageChildren(node.children) : undefined;
+    const isLayout = ['LAYOUT', 'BLANK', 'IFRAME'].includes(component.toUpperCase());
+
+    if (isLayout) {
+      result.push(children ? { ...node, children } : { ...node, children: undefined });
+      return;
+    }
+
+    const { children: _nested, ...page } = node;
+    result.push(page);
+    if (children?.length) result.push(...children);
   });
+
+  return result;
 }
 
 // 动态从包内引入单个Icon,如果没有网络环境可以使用这种方式 但是会导致产物存在多个chunk
