@@ -1,13 +1,15 @@
 import type {
-  AppMenuPage,
+  ApiIdParams,
   AppMenuPageParams,
-  AppMenuTree,
-  AppMenuTreeParams,
+  AppMenuRow,
   AppPageParams,
+  ClientAppListItem,
   ClientAppPage,
   DeleteAppMenuActionParams,
   DeleteAppMenuParams,
   DeleteAppMenuSubPageParams,
+  MenuOption,
+  PagedResult,
   SaveAppMenuActionParams,
   SaveAppMenuParams,
   SaveAppMenuSubPageParams,
@@ -18,10 +20,11 @@ import { Service } from '@/api/services';
 import { request } from '@/utils/request';
 
 const Api = {
-  Page: `${Service.apex}/App/page`,
-  Save: `${Service.apex}/App/save`,
-  Menus: `${Service.apex}/App/menus`,
-  PageMenu: `${Service.apex}/App/pageMenu`,
+  Page: `${Service.apex}/App/getAppPage`,
+  Save: `${Service.apex}/App/saveApp`,
+  GetApp: `${Service.apex}/App/getApp`,
+  MenuOptions: `${Service.apex}/App/getMenuOptions`,
+  PageMenu: `${Service.apex}/App/getMenuPage`,
   SaveMenu: `${Service.apex}/App/saveMenu`,
   DeleteMenu: `${Service.apex}/App/deleteMenu`,
   SaveMenuAction: `${Service.apex}/App/saveMenuAction`,
@@ -46,17 +49,25 @@ export function saveApp(data: Omit<SaveAppParams, 'version'>) {
   });
 }
 
-/** 指定应用的菜单树，含停用节点 */
-export function getAppMenus(data: Omit<AppMenuTreeParams, 'version'>) {
-  return request.post<AppMenuTree>({
-    url: Api.Menus,
+/** 按 Id 取单个应用（不含密钥） */
+export function getApp(data: Omit<ApiIdParams, 'version'>) {
+  return request.post<ClientAppListItem>({
+    url: Api.GetApp,
+    data,
+  });
+}
+
+/** 指定应用的上级菜单候选项 */
+export function getMenuOptions(data: Omit<ApiIdParams, 'version'>) {
+  return request.post<MenuOption[]>({
+    url: Api.MenuOptions,
     data,
   });
 }
 
 /** 指定应用的菜单分页，行上带子页面与动作 */
 export function pageAppMenus(data: Omit<AppMenuPageParams, 'version'>) {
-  return request.post<AppMenuPage>({
+  return request.post<PagedResult<AppMenuRow>>({
     url: Api.PageMenu,
     data,
   });

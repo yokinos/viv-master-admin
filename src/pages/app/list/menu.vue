@@ -327,13 +327,14 @@ import {
   deleteAppMenu,
   deleteAppMenuAction,
   deleteAppMenuSubPage,
-  getAppMenus,
+  getApp,
+  getMenuOptions,
   pageAppMenus,
   saveAppMenu,
   saveAppMenuAction,
   saveAppMenuSubPage,
 } from '@/api/apex/app';
-import type { AppMenuRow, MenuActionNode, MenuAdminNode, MenuSubPageNode } from '@/api/model/apex/appModel';
+import type { AppMenuRow, MenuActionNode, MenuOption, MenuSubPageNode } from '@/api/model/apex/appModel';
 import { AppStatus, ClientStackVue, MenuType } from '@/api/model/apex/appModel';
 import { t } from '@/locales';
 
@@ -398,7 +399,7 @@ const appName = ref('');
 const appKey = ref('');
 const clientStack = ref(ClientStackVue);
 const rows = ref<AppMenuRow[]>([]);
-const allMenus = ref<MenuAdminNode[]>([]);
+const menuOptions = ref<MenuOption[]>([]);
 const query = reactive({ keyword: '' });
 const appliedKeyword = ref('');
 const pagination = ref({ current: 1, pageSize: 20, total: 0 });
@@ -461,22 +462,36 @@ const actionColumns = computed<PrimaryTableCol<TableRowData>[]>(() => [
 ]);
 
 const parents = computed(() => {
+  // 上级候选从轻量接口拿，平铺列表在这里按 parentId 分组
+  const childrenOf = new Map<string, MenuOption[]>();
+  menuOptions.value.forEach((item) => {
+    const list = childrenOf.get(item.parentId) ?? [];
+    list.push(item);
+    childrenOf.set(item.parentId, list);
+  });
+
+  // 自己和自己的后代不能当上级
   const blocked = new Set<string>();
   if (form.id !== '0') {
-    const self = findNode(allMenus.value, form.id);
-    if (self) collectIds(self, blocked);
+    const stack = [form.id];
+    while (stack.length) {
+      const id = stack.pop() as string;
+      if (blocked.has(id)) continue;
+      blocked.add(id);
+      (childrenOf.get(id) ?? []).forEach((child) => stack.push(child.id));
+    }
   }
 
   const options = [{ label: t('pages.app.menu.root'), value: '0' }];
-  const walk = (nodes: MenuAdminNode[], depth: number) => {
-    nodes.forEach((node) => {
-      if (!blocked.has(node.id) && !node.isSubPage) {
-        options.push({ label: `${'\u3000'.repeat(depth)}${node.title}`, value: node.id });
+  const walk = (parentId: string, depth: number) => {
+    (childrenOf.get(parentId) ?? []).forEach((item) => {
+      if (!blocked.has(item.id)) {
+        options.push({ label: `${'\u3000'.repeat(depth)}${item.title}`, value: item.id });
       }
-      if (node.children?.length) walk(node.children, depth + 1);
+      walk(item.id, depth + 1);
     });
   };
-  walk(allMenus.value, 0);
+  walk('0', 0);
   return options;
 });
 
@@ -497,6 +512,7 @@ watch(
   clientAppId,
   () => {
     pagination.value.current = 1;
+    loadAppInfo();
     load();
   },
   { immediate: true },
@@ -547,20 +563,6 @@ function blankAction(menuId: string): ActionForm {
   };
 }
 
-function findNode(nodes: MenuAdminNode[], id: string): MenuAdminNode | undefined {
-  for (const node of nodes) {
-    if (node.id === id) return node;
-    const child = node.children?.length ? findNode(node.children, id) : undefined;
-    if (child) return child;
-  }
-  return undefined;
-}
-
-function collectIds(node: MenuAdminNode, ids: Set<string>) {
-  ids.add(node.id);
-  node.children?.forEach((child) => collectIds(child, ids));
-}
-
 function routePath(raw: string | null | undefined) {
   return parseRouteConfig(raw ?? '').draft.path || '—';
 }
@@ -580,8 +582,6 @@ function search() {
 async function load() {
   if (!clientAppId.value) {
     rows.value = [];
-    appName.value = '';
-    appKey.value = '';
     return;
   }
 
@@ -593,9 +593,6 @@ async function load() {
       pageSize: pagination.value.pageSize,
       keyword: appliedKeyword.value || undefined,
     });
-    appName.value = data.name ?? '';
-    appKey.value = data.appKey ?? '';
-    clientStack.value = data.clientStack ?? ClientStackVue;
     rows.value = data.items ?? [];
     pagination.value.total = Number(data.totalCount) || 0;
     syncDetail();
@@ -603,6 +600,36 @@ async function load() {
     MessagePlugin.error((error as Error).message);
   } finally {
     loading.value = false;
+  }
+}
+
+/** 应用信息（名称/AppKey/技术栈）单独取，分页接口只返回标准分页对象 */
+async function loadAppInfo() {
+  if (!clientAppId.value) {
+    appName.value = '';
+    appKey.value = '';
+    clientStack.value = ClientStackVue;
+    return;
+  }
+
+  try {
+    const app = await getApp({ id: clientAppId.value });
+    appName.value = app.name ?? '';
+    appKey.value = app.appKey ?? '';
+    clientStack.value = app.clientStack ?? ClientStackVue;
+  } catch (error) {
+    MessagePlugin.error((error as Error).message);
+  }
+}
+
+/** 上级候选菜单，打开表单时按需取 */
+async function ensureMenuOptions() {
+  if (!clientAppId.value) return;
+
+  try {
+    menuOptions.value = await getMenuOptions({ id: clientAppId.value });
+  } catch (error) {
+    MessagePlugin.error((error as Error).message);
   }
 }
 
@@ -618,25 +645,15 @@ function syncDetail() {
   detailRow.value = current;
 }
 
-async function ensureAllMenus() {
-  if (!clientAppId.value) return;
-  try {
-    const tree = await getAppMenus({ clientAppId: clientAppId.value });
-    allMenus.value = tree.menus ?? [];
-  } catch (error) {
-    MessagePlugin.error((error as Error).message);
-  }
-}
-
 async function openCreate(parentId: string) {
-  await ensureAllMenus();
+  await ensureMenuOptions();
   Object.assign(form, blankForm(parentId));
   routeOriginal.value = null;
   drawerVisible.value = true;
 }
 
 async function openEdit(row: AppMenuRow) {
-  await ensureAllMenus();
+  await ensureMenuOptions();
 
   const parsed = parseRouteConfig(row.routeConfig);
   if (parsed.invalid) MessagePlugin.warning(t('pages.app.menu.routeInvalid'));

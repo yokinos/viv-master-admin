@@ -15,7 +15,7 @@ export const AppStatus = {
 /** `EmClientStack.Vue`。目前只有 Vue 有菜单适配器 */
 export const ClientStackVue = 0;
 
-/** `POST /App/page` 的一行。long 是字符串 */
+/** `POST /App/getAppPage` 的一行。long 是字符串 */
 export interface ClientAppListItem {
   id: string;
   appKey: string;
@@ -29,13 +29,19 @@ export interface ClientAppListItem {
   remark: string;
 }
 
-export interface ClientAppPage {
+/** 标准分页对象（对应后端 PagedList<T>） */
+export interface PagedResult<T> {
   pageIndex: number;
   pageSize: number;
+  totalPages: number;
   /** long → 字符串 */
   totalCount: string;
-  items: ClientAppListItem[];
+  isHaveFrontPage: boolean;
+  isHaveNextPage: boolean;
+  items: T[];
 }
+
+export type ClientAppPage = PagedResult<ClientAppListItem>;
 
 export interface AppPageParams extends VivApiRequest {
   pageIndex: number;
@@ -73,35 +79,18 @@ export interface MenuActionNode {
   status: number;
 }
 
-/** 后台菜单节点，含停用。`routeConfig` 是技术栈自己的 JSON */
-export interface MenuAdminNode {
+/** 上级菜单候选项。只带组树需要的字段 */
+export interface MenuOption {
   id: string;
   parentId: string;
   title: string;
-  type: number;
-  icon: string;
   sort: number;
-  isVisible: boolean;
-  routeConfig: string;
-  description: string;
-  status: number;
-  /** 挂在页面下的子页面，不是菜单节点 */
-  isSubPage?: boolean;
-  /** 页面下的动作（权限点），目录与子页面为空 */
-  actions?: MenuActionNode[];
-  children: MenuAdminNode[];
+  type: number;
 }
 
-export interface AppMenuTree {
-  clientAppId: string;
-  name: string;
-  appKey: string;
-  clientStack: number;
-  menus: MenuAdminNode[];
-}
-
-export interface AppMenuTreeParams extends VivApiRequest {
-  clientAppId: string;
+/** 按 Id 取数据 */
+export interface ApiIdParams extends VivApiRequest {
+  id: string;
 }
 
 /** Id 为 `"0"` 是新增 */
@@ -169,18 +158,6 @@ export interface AppMenuRow {
   childCount: number;
   subPages: MenuSubPageNode[];
   actions: MenuActionNode[];
-}
-
-export interface AppMenuPage {
-  clientAppId: string;
-  name: string;
-  appKey: string;
-  clientStack: number;
-  pageIndex: number;
-  pageSize: number;
-  /** long → 字符串 */
-  totalCount: string;
-  items: AppMenuRow[];
 }
 
 export interface AppMenuPageParams extends VivApiRequest {
