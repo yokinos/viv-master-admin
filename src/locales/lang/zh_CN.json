@@ -750,7 +750,8 @@
         "saved": "已保存",
         "secretTitle": "请保存应用密钥",
         "secretBody": "密钥只显示这一次，关闭后无法再查看。",
-        "copySecret": "复制密钥"
+        "copySecret": "复制密钥",
+        "copyKey": "点击复制 AppKey"
       },
       "menu": {
         "back": "返回应用列表",

@@ -748,7 +748,8 @@
         "saved": "Saved",
         "secretTitle": "Save the app secret",
         "secretBody": "The secret is shown only once.",
-        "copySecret": "Copy secret"
+        "copySecret": "Copy secret",
+        "copyKey": "Click to copy AppKey"
       },
       "menu": {
         "back": "Back to apps",
